@@ -85,10 +85,6 @@ sudo restorecon -RFv /opt/flexidot/static
 `/etc/httpd/conf.d/flexidot.conf` を作成:
 
 ```apache
-# アプリ本体を /flexidot にマウント
-WSGIScriptAlias /flexidot /opt/flexidot/wsgi.py \
-    process-group=flexidot application-group=%{GLOBAL}
-
 # WSGI デーモンプロセス (システム Python 3.9 + 仮想環境)
 WSGIDaemonProcess flexidot \
     python-home=/opt/flexidot/venv \
@@ -96,6 +92,9 @@ WSGIDaemonProcess flexidot \
     processes=2 threads=15 \
     display-name=%{GROUP}
 WSGIProcessGroup flexidot
+
+# アプリ本体を /flexidot にマウント
+WSGIScriptAlias /flexidot /opt/flexidot/wsgi.py
 
 # 静的ファイルは Apache で直接配信
 Alias /flexidot/static /opt/flexidot/static
