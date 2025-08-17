@@ -38,9 +38,9 @@ FlexiDot 2.x は Python 3.12 以降の構文 (PEP 701 による f-string 拡張)
 1) 必要パッケージのインストール
 
 ```bash
-# 基本ツール
+# 基本ツール（Python はユーザー領域に導入するため dnf では入れません）
 sudo dnf -y install epel-release
-sudo dnf -y install httpd python3.12 python3.12-pip git mod_proxy mod_proxy_http policycoreutils-python-utils
+sudo dnf -y install httpd git mod_proxy mod_proxy_http policycoreutils-python-utils
 
 # 起動と常時起動
 sudo systemctl enable --now httpd
@@ -51,7 +51,7 @@ sudo firewall-cmd --add-service=https --permanent
 sudo firewall-cmd --reload
 ```
 
-2) アプリ配置と仮想環境
+2) アプリ配置と Python 3.12（非管理者権限; micromamba 使用）
 
 ```bash
 # 配置先 (例): /opt/flexidot
@@ -63,9 +63,20 @@ cd /opt/flexidot
 git clone https://github.com/c2997108/flexidot-web.git .
 # (このリポジトリをそのままコピーしてもOK)
 
-# Python 3.12 仮想環境
-/usr/bin/python3.12 -m venv venv
-source venv/bin/activate
+# Python 3.12 をユーザー領域に導入（micromamba）
+# 1) micromamba 本体の配置（ユーザー権限のみ）
+mkdir -p "$HOME/bin" "$HOME/micromamba" "$HOME/mamba"
+curl -L https://micro.mamba.pm/api/micromamba/linux-64/latest -o "$HOME/micromamba/micromamba.tar.bz2"
+tar -xjf "$HOME/micromamba/micromamba.tar.bz2" -C "$HOME/micromamba" --strip-components=1 bin/micromamba
+ln -sf "$HOME/micromamba/bin/micromamba" "$HOME/bin/micromamba"
+export PATH="$HOME/bin:$PATH"
+
+# 2) 環境を作成（python=3.12）
+export MAMBA_ROOT_PREFIX="$HOME/mamba"
+micromamba create -y -n flexidot python=3.12 pip
+eval "$(micromamba shell hook -s bash)" && micromamba activate flexidot
+
+# 3) 依存関係をインストール
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
@@ -100,7 +111,8 @@ Group=apache
 WorkingDirectory=/opt/flexidot
 Environment=FLEXIDOT_URL_PREFIX=/flexidot
 Environment=MPLBACKEND=Agg
-ExecStart=/opt/flexidot/venv/bin/gunicorn -w 2 -b 127.0.0.1:8000 wsgi:application
+Environment=MAMBA_ROOT_PREFIX=/home/flexidot/mamba
+ExecStart=/home/flexidot/micromamba/bin/micromamba run -n flexidot gunicorn -w 2 -b 127.0.0.1:8000 wsgi:application
 Restart=always
 RestartSec=3
 
@@ -115,6 +127,20 @@ sudo useradd -r -s /sbin/nologin -d /opt/flexidot flexidot || true
 sudo chown -R flexidot:apache /opt/flexidot
 sudo chmod 750 /opt/flexidot
 sudo chown -R flexidot:apache /opt/flexidot/static/plots
+
+# （推奨）Python 環境も flexidot ユーザーで作成:
+sudo -u flexidot -H bash -lc '
+  mkdir -p "$HOME/bin" "$HOME/micromamba" "$HOME/mamba" && \
+  curl -L https://micro.mamba.pm/api/micromamba/linux-64/latest -o "$HOME/micromamba/micromamba.tar.bz2" && \
+  tar -xjf "$HOME/micromamba/micromamba.tar.bz2" -C "$HOME/micromamba" --strip-components=1 bin/micromamba && \
+  ln -sf "$HOME/micromamba/bin/micromamba" "$HOME/bin/micromamba" && \
+  export PATH="$HOME/bin:$PATH" && \
+  export MAMBA_ROOT_PREFIX="$HOME/mamba" && \
+  "$HOME/bin/micromamba" create -y -n flexidot python=3.12 pip && \
+  eval "$("$HOME/bin/micromamba" shell hook -s bash)" && micromamba activate flexidot && \
+  pip install --upgrade pip && \
+  cd /opt/flexidot && pip install -r requirements.txt 
+'
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now flexidot.service
@@ -131,10 +157,11 @@ Alias /flexidot/static /opt/flexidot/static
     Require all granted
 </Directory>
 
-# アプリ本体は Gunicorn へプロキシ
+# アプリ本体は Gunicorn へプロキシ (上流はルートで待受け、Prefix はヘッダで伝達)
 ProxyPreserveHost On
-ProxyPass /flexidot http://127.0.0.1:8000/flexidot retry=0
-ProxyPassReverse /flexidot http://127.0.0.1:8000/flexidot
+RequestHeader set X-Forwarded-Prefix "/flexidot"
+ProxyPass /flexidot http://127.0.0.1:8000/ retry=0
+ProxyPassReverse /flexidot http://127.0.0.1:8000/
 ```
 
 SELinux (Apache からローカルポートへのプロキシ許可):

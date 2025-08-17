@@ -69,24 +69,39 @@ def find_png(outdir: Path) -> Optional[Path]:
 
 
 class PrefixMiddleware:
-    def __init__(self, app, prefix: str):
+    """Mount app under a URL prefix.
+
+    - Honors X-Forwarded-Prefix from a reverse proxy.
+    - Falls back to a configured prefix passed at init.
+    - Adjusts SCRIPT_NAME/PATH_INFO so Flask builds prefixed URLs.
+    """
+
+    def __init__(self, app, default_prefix: str = ""):
         self.app = app
-        self.prefix = prefix.rstrip("/") or ""
+        self.default_prefix = (default_prefix or "").rstrip("/")
 
     def __call__(self, environ, start_response):
-        script_name = environ.get("SCRIPT_NAME", "")
+        hdr_prefix = environ.get("HTTP_X_FORWARDED_PREFIX", "").rstrip("/")
+        configured = self.default_prefix
+        prefix = hdr_prefix or configured or ""
+        if not prefix:
+            return self.app(environ, start_response)
+
         path_info = environ.get("PATH_INFO", "")
-        # If already mounted (e.g., mod_wsgi sets SCRIPT_NAME), just pass through
-        if script_name.startswith(self.prefix) or script_name == self.prefix:
+        script_name = environ.get("SCRIPT_NAME", "")
+
+        # If SCRIPT_NAME already matches, just pass through
+        if script_name == prefix or script_name.startswith(prefix + "/"):
             return self.app(environ, start_response)
-        # Dev-mode mount at subpath
-        if path_info.startswith(self.prefix + "/") or path_info == self.prefix:
-            environ["SCRIPT_NAME"] = self.prefix
-            environ["PATH_INFO"] = path_info[len(self.prefix):] or "/"
+
+        # If request path starts with prefix, strip it and set SCRIPT_NAME
+        if path_info == prefix or path_info.startswith(prefix + "/"):
+            environ["SCRIPT_NAME"] = prefix
+            environ["PATH_INFO"] = path_info[len(prefix) :] or "/"
             return self.app(environ, start_response)
-        # Not under prefix: 404 to indicate mount path
-        start_response('404 NOT FOUND', [('Content-Type', 'text/plain; charset=utf-8')])
-        return [f"This app is mounted at {self.prefix}/".encode('utf-8')]
+
+        # Otherwise, do not break other apps mounted elsewhere: just pass through
+        return self.app(environ, start_response)
 
 
 def create_app():
@@ -217,10 +232,9 @@ def create_app():
         # GET request
         return render_template("index.html", result=None, error_log=None, default_k=10, default_seq_type="nuc")
 
-    # Optional: run under a subpath in dev (Apache/mod_wsgi should set SCRIPT_NAME instead)
+    # Honor URL prefix from reverse proxy or env
     url_prefix = os.environ.get("FLEXIDOT_URL_PREFIX", "").strip()
-    if url_prefix:
-        app.wsgi_app = PrefixMiddleware(app.wsgi_app, url_prefix)
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app, url_prefix)
 
     return app
 
