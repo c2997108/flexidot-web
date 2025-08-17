@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 import shutil
+import sys
 
 from flask import Flask, render_template, request, redirect, url_for, flash
 from werkzeug.utils import secure_filename
@@ -24,7 +25,17 @@ def allowed_ext(filename: str) -> bool:
 
 
 def run_flexidot(inp1: Path, inp2: Path, outdir: Path, prefix: str, k: int, seq_type: str):
-    exe = shutil.which("flexidot") or "flexidot"
+    # Resolve flexidot executable: prefer the same venv as current Python
+    venv_bin = Path(sys.executable).parent
+    candidate_venv = venv_bin / "flexidot"
+    exe = str(candidate_venv) if candidate_venv.exists() else shutil.which("flexidot")
+    if not exe:
+        return (
+            127,
+            "",
+            f"flexidot executable not found. Tried {candidate_venv} and PATH.\n"
+            f"sys.executable={sys.executable}\nPATH={os.environ.get('PATH','')}\n",
+        )
     cmd = [
         exe,
         "-i",
@@ -47,6 +58,7 @@ def run_flexidot(inp1: Path, inp2: Path, outdir: Path, prefix: str, k: int, seq_
     env.setdefault("MPLBACKEND", "Agg")
     env.setdefault("LC_ALL", env.get("LC_ALL", "C"))
     env.setdefault("LANG", env.get("LANG", "C"))
+    env["PATH"] = str(venv_bin) + os.pathsep + env.get("PATH", "")
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return proc.returncode, proc.stdout, proc.stderr
 
