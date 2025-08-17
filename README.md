@@ -156,10 +156,9 @@ Alias /flexidot/static /opt/flexidot/static
 <Directory /opt/flexidot/static>
     Require all granted
 </Directory>
-
 # アプリ本体は Gunicorn へプロキシ
-ProxyPass /flexidot http://127.0.0.1:8082/ retry=0
-ProxyPassReverse /flexidot http://127.0.0.1:8082/
+ProxyPass /flexidot/ http://127.0.0.1:8082/flexidot/       
+ProxyPassReverse /flexidot/ http://127.0.0.1:8082/flexidot/
 ```
 
 SELinux (Apache からローカルポートへのプロキシ許可):
