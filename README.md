@@ -29,14 +29,18 @@ FlexiDot を使って 2 つの FASTA ファイルからドットプロット画�
 注: Matplotlib などは manylinux ホイールが提供されており、追加のビルドツールなしで導入できます。企業ネットワーク等で外部リポジトリへのアクセス制限がある場合は、ホイール取得のためのプロキシ設定が必要です。
 
 
-## セットアップ手順 (Apache + mod_wsgi, サブディレクトリ `/flexidot`)
+## 推奨セットアップ (Gunicorn + Apache リバースプロキシ, サブディレクトリ `/flexidot`)
+FlexiDot 2.x は Python 3.12 以降の構文 (PEP 701 による f-string 拡張) を含むため、Rocky Linux 9 の標準 Python 3.9 + mod_wsgi では実行に失敗します。
+そのため、アプリは Python 3.12 の仮想環境上で Gunicorn を用いて起動し、Apache はリバースプロキシとして動作させる方法を推奨します。
+
 以下は root 権限での作業を想定しています。
 
 1) 必要パッケージのインストール
 
 ```bash
 # 基本ツール
-sudo dnf -y install httpd mod_wsgi python3 python3-pip git
+sudo dnf -y install epel-release
+sudo dnf -y install httpd python3.12 python3.12-pip git mod_proxy mod_proxy_http policycoreutils-python-utils
 
 # 起動と常時起動
 sudo systemctl enable --now httpd
@@ -59,8 +63,8 @@ cd /opt/flexidot
 git clone https://github.com/c2997108/flexidot-web.git .
 # (このリポジトリをそのままコピーしてもOK)
 
-# Python 仮想環境
-python3 -m venv venv
+# Python 3.12 仮想環境
+/usr/bin/python3.12 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
@@ -80,37 +84,63 @@ sudo semanage fcontext -a -t httpd_sys_rw_content_t '/opt/flexidot/static/plots(
 sudo restorecon -RFv /opt/flexidot/static
 ```
 
-4) Apache 設定 (mod_wsgi で `/flexidot` にマウント)
+4) Gunicorn の systemd サービス設定（自動起動）
 
-`/etc/httpd/conf.d/flexidot.conf` を作成 (WSGI の定義順に注意: DaemonProcess → ProcessGroup → ScriptAlias の順):
+`/etc/systemd/system/flexidot.service` を作成:
+
+```ini
+[Unit]
+Description=FlexiDot Web (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=flexidot
+Group=apache
+WorkingDirectory=/opt/flexidot
+Environment=FLEXIDOT_URL_PREFIX=/flexidot
+Environment=MPLBACKEND=Agg
+ExecStart=/opt/flexidot/venv/bin/gunicorn -w 2 -b 127.0.0.1:8000 wsgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+サービスユーザーの作成と権限設定:
+
+```bash
+sudo useradd -r -s /sbin/nologin -d /opt/flexidot flexidot || true
+sudo chown -R flexidot:apache /opt/flexidot
+sudo chmod 750 /opt/flexidot
+sudo chown -R flexidot:apache /opt/flexidot/static/plots
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now flexidot.service
+```
+
+5) Apache 設定 (リバースプロキシで `/flexidot` に公開)
+
+`/etc/httpd/conf.d/flexidot.conf` を作成:
 
 ```apache
-# WSGI デーモンプロセス (システム Python 3.9 + 仮想環境)
-WSGIDaemonProcess flexidot \
-    python-home=/opt/flexidot/venv \
-    python-path=/opt/flexidot \
-    processes=2 threads=15 \
-    display-name=%{GROUP}
-WSGIProcessGroup flexidot
-
-# アプリ本体を /flexidot にマウント
-WSGIScriptAlias /flexidot /opt/flexidot/wsgi.py
-
-# NumPy 等のサブインタプリタ警告を避けるためグローバル解釈系で実行
-WSGIApplicationGroup %{GLOBAL}
-
-# 静的ファイルは Apache で直接配信
+# 静的ファイルは Apache が直接配信
 Alias /flexidot/static /opt/flexidot/static
 <Directory /opt/flexidot/static>
     Require all granted
 </Directory>
 
-# WSGI エントリの実行許可
-<Directory /opt/flexidot>
-    <Files wsgi.py>
-        Require all granted
-    </Files>
-</Directory>
+# アプリ本体は Gunicorn へプロキシ
+ProxyPreserveHost On
+ProxyPass /flexidot http://127.0.0.1:8000/flexidot retry=0
+ProxyPassReverse /flexidot http://127.0.0.1:8000/flexidot
+```
+
+SELinux (Apache からローカルポートへのプロキシ許可):
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
 ```
 
 設定反映:
@@ -120,10 +150,6 @@ sudo apachectl configtest
 sudo systemctl restart httpd
 ```
 
-ヒント:
-- `semanage` コマンドが無い場合は `sudo dnf -y install policycoreutils-python-utils` をインストールしてください。
-- `AH00526: WSGI process group not yet configured` と出る場合は、上記のように `WSGIDaemonProcess` を `WSGIScriptAlias` より前に記述してください（順序依存）。
-
 5) 動作確認
 
 - ブラウザで `http://<サーバー名またはIP>/flexidot/` にアクセス
@@ -132,19 +158,10 @@ sudo systemctl restart httpd
 
 
 ## 自動起動について
-本アプリは Apache (httpd) の mod_wsgi として動作するため、サーバー起動時に `httpd` を自動起動にしておけば、アプリも自動で起動・公開されます。
+本アプリは `flexidot.service` (Gunicorn) を systemd で管理し、Apache は単なるリバースプロキシとして動作します。サーバー起動時に両方が自動起動するよう、`httpd` と `flexidot` を enable 済みにしてください。
 
 ```bash
-sudo systemctl enable httpd
-```
-
-アプリのコードを更新した場合は Apache を再起動するか、`wsgi.py` のタイムスタンプを更新してください。
-
-```bash
-# 再起動
-sudo systemctl restart httpd
-# もしくは、wsgi.py を touch して再読み込み
-sudo touch /opt/flexidot/wsgi.py
+sudo systemctl enable httpd flexidot
 ```
 
 
