@@ -2,6 +2,7 @@ import os
 import uuid
 import subprocess
 from pathlib import Path
+from typing import Optional
 import shutil
 
 from flask import Flask, render_template, request, redirect, url_for, flash
@@ -50,7 +51,7 @@ def run_flexidot(inp1: Path, inp2: Path, outdir: Path, prefix: str, k: int, seq_
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def find_png(outdir: Path) -> Path | None:
+def find_png(outdir: Path) -> Optional[Path]:
     pngs = sorted(outdir.glob("*.png"))
     return pngs[0] if pngs else None
 
