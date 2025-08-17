@@ -72,9 +72,9 @@ ln -sf "$HOME/micromamba/bin/micromamba" "$HOME/bin/micromamba"
 export PATH="$HOME/bin:$PATH"
 
 # 2) 環境を作成（python=3.12）
-export MAMBA_ROOT_PREFIX="$HOME/mamba"
-micromamba create -y -n flexidot python=3.12 pip
-eval "$(micromamba shell hook -s bash)" && micromamba activate flexidot
+export CONDA_ENVS_DIRS=/opt/flexidot/condaenv
+mamba create -y -n flexidot python=3.12 pip
+conda activate flexidot
 
 # 3) 依存関係をインストール
 pip install --upgrade pip
@@ -88,7 +88,7 @@ pip install -r requirements.txt
 mkdir -p static/plots
 
 # Apache から書き込み可能にする (所有権を apache に変更)
-sudo chown -R apache:apache static/plots
+sudo chown -R apache:apache .
 
 # SELinux 有効時は書き込みコンテキストを付与
 sudo semanage fcontext -a -t httpd_sys_rw_content_t '/opt/flexidot/static/plots(/.*)?'
@@ -106,13 +106,13 @@ After=network.target
 
 [Service]
 Type=simple
-User=flexidot
+User=apache
 Group=apache
 WorkingDirectory=/opt/flexidot
 Environment=FLEXIDOT_URL_PREFIX=/flexidot
 Environment=MPLBACKEND=Agg
-Environment=MAMBA_ROOT_PREFIX=/home/flexidot/mamba
-ExecStart=/home/flexidot/micromamba/bin/micromamba run -n flexidot gunicorn -w 2 -b 127.0.0.1:8000 wsgi:application
+Environment=CONDA_ENVS_DIRS=/opt/flexidot/condaenv
+ExecStart=/suikou/tool9/mambaforge/condabin/mamba run -n flexidot gunicorn -w 2 -b 127.0.0.1:8082 wsgi:application
 Restart=always
 RestartSec=3
 
@@ -157,11 +157,9 @@ Alias /flexidot/static /opt/flexidot/static
     Require all granted
 </Directory>
 
-# アプリ本体は Gunicorn へプロキシ (上流はルートで待受け、Prefix はヘッダで伝達)
-ProxyPreserveHost On
-RequestHeader set X-Forwarded-Prefix "/flexidot"
-ProxyPass /flexidot http://127.0.0.1:8000/ retry=0
-ProxyPassReverse /flexidot http://127.0.0.1:8000/
+# アプリ本体は Gunicorn へプロキシ
+ProxyPass /flexidot http://127.0.0.1:8082/ retry=0
+ProxyPassReverse /flexidot http://127.0.0.1:8082/
 ```
 
 SELinux (Apache からローカルポートへのプロキシ許可):
