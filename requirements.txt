@@ -1,0 +1,2 @@
+Flask>=3.0
+flexidot>=2.0.1

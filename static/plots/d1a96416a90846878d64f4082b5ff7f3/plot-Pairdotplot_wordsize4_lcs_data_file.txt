@@ -1,0 +1,2 @@
+#title1	title2	len_seq1	len_seq2	len_lcs_for	%_min_seq_len	len_lcs_rev	%_min_seq_len
+b	a	12	12	8	66.667	8	66.667

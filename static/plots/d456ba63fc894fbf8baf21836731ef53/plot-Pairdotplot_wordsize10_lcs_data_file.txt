@@ -1,0 +1,2 @@
+#title1	title2	len_seq1	len_seq2	len_lcs_for	%_min_seq_len	len_lcs_rev	%_min_seq_len
+file2|AP022815.1	file1|AP022815.1	6930	6930	6930	100.0	18	0.26
