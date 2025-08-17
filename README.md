@@ -82,7 +82,7 @@ sudo restorecon -RFv /opt/flexidot/static
 
 4) Apache 設定 (mod_wsgi で `/flexidot` にマウント)
 
-`/etc/httpd/conf.d/flexidot.conf` を作成:
+`/etc/httpd/conf.d/flexidot.conf` を作成 (WSGI の定義順に注意: DaemonProcess → ProcessGroup → ScriptAlias の順):
 
 ```apache
 # WSGI デーモンプロセス (システム Python 3.9 + 仮想環境)
@@ -95,6 +95,9 @@ WSGIProcessGroup flexidot
 
 # アプリ本体を /flexidot にマウント
 WSGIScriptAlias /flexidot /opt/flexidot/wsgi.py
+
+# NumPy 等のサブインタプリタ警告を避けるためグローバル解釈系で実行
+WSGIApplicationGroup %{GLOBAL}
 
 # 静的ファイルは Apache で直接配信
 Alias /flexidot/static /opt/flexidot/static
@@ -116,6 +119,10 @@ Alias /flexidot/static /opt/flexidot/static
 sudo apachectl configtest
 sudo systemctl restart httpd
 ```
+
+ヒント:
+- `semanage` コマンドが無い場合は `sudo dnf -y install policycoreutils-python-utils` をインストールしてください。
+- `AH00526: WSGI process group not yet configured` と出る場合は、上記のように `WSGIDaemonProcess` を `WSGIScriptAlias` より前に記述してください（順序依存）。
 
 5) 動作確認
 
