@@ -56,7 +56,7 @@ sudo chown $USER:$USER /opt/flexidot
 cd /opt/flexidot
 
 # 取得
-git clone https://example.com/your/flexidot-web.git .
+git clone https://github.com/c2997108/flexidot-web.git .
 # (このリポジトリをそのままコピーしてもOK)
 
 # Python 仮想環境
